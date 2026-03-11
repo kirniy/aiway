@@ -1,0 +1,71 @@
+#!/bin/sh
+
+ENABLED=yes
+PROCS=aiway-manager
+DESC="AIWAY Manager"
+BIN="/opt/bin/aiway-manager"
+PID_FILE="/opt/var/run/aiway-manager.pid"
+CONFIG_DIR="/opt/etc/aiway-manager"
+
+[ -x "$BIN" ] || exit 0
+mkdir -p /opt/var/run "$CONFIG_DIR"
+
+get_port() {
+    local port
+    port=$(sed -n 's/.*"port"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$CONFIG_DIR/config.json" 2>/dev/null)
+    [ -n "$port" ] || port=2222
+    echo "$port"
+}
+
+get_host() {
+    local host
+    host=$(ip -4 addr show br0 2>/dev/null | awk '/inet /{sub(/\/.*/, "", $2); print $2; exit}')
+    [ -n "$host" ] || host="192.168.1.1"
+    echo "$host"
+}
+
+start() {
+    [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE" 2>/dev/null)" 2>/dev/null && {
+        echo "$DESC already running"
+        return 0
+    }
+
+    echo "Starting $DESC..."
+    start-stop-daemon -S -b -m -p "$PID_FILE" -x "$BIN" -- serve -config-dir "$CONFIG_DIR" -addr ":$(get_port)"
+    sleep 1
+    echo "$DESC started: http://$(get_host):$(get_port)/routing"
+}
+
+stop() {
+    if [ -f "$PID_FILE" ]; then
+        kill "$(cat "$PID_FILE" 2>/dev/null)" 2>/dev/null || true
+        rm -f "$PID_FILE"
+    fi
+    echo "$DESC stopped"
+}
+
+restart() {
+    stop
+    sleep 1
+    start
+}
+
+status() {
+    if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE" 2>/dev/null)" 2>/dev/null; then
+        echo "$DESC running: http://$(get_host):$(get_port)/routing"
+        return 0
+    fi
+    echo "$DESC not running"
+    return 1
+}
+
+case "$1" in
+    start) start ;;
+    stop) stop ;;
+    restart) restart ;;
+    status) status ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|status}"
+        exit 1
+        ;;
+esac

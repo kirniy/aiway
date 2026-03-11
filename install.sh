@@ -12,6 +12,11 @@ source "${SCRIPT_DIR}/lib/utils.sh"
 source "${SCRIPT_DIR}/lib/domains.sh"
 
 # ── Paths ────────────────────────────────────────────────────────────────────
+AIWAY_ETC_DIR="/etc/aiway"
+AIWAY_RUNTIME_DIR="${AIWAY_ETC_DIR}/runtime"
+AIWAY_CUSTOM_DOMAINS_FILE="${AIWAY_ETC_DIR}/custom-domains.txt"
+AIWAY_INSTALLER_ENV="${AIWAY_ETC_DIR}/installer.env"
+AIWAY_CTL_TARGET="/usr/local/bin/aiwayctl"
 ANGIE_CONF="/etc/angie/angie.conf"
 ANGIE_STREAM_DIR="/etc/angie/stream.d"
 ANGIE_HTTP_DIR="/etc/angie/http.d"
@@ -22,6 +27,30 @@ BLOCKY_CONFIG="${BLOCKY_DIR}/config.yml"
 VPS_IP=""
 DOT_DOMAIN=""
 ACME_EMAIL=""
+
+append_unique() {
+    local value="$1"
+    shift
+    local existing
+    for existing in "$@"; do
+        [[ "$existing" == "$value" ]] && return 0
+    done
+    return 1
+}
+
+load_custom_domains() {
+    [[ -f "$AIWAY_CUSTOM_DOMAINS_FILE" ]] || return 0
+
+    local domain
+    while IFS= read -r domain; do
+        domain="${domain%%#*}"
+        domain="${domain//[[:space:]]/}"
+        [[ -z "$domain" ]] && continue
+        append_unique "$domain" "${AI_APEX_DOMAINS[@]}" || AI_APEX_DOMAINS+=("$domain")
+    done < "$AIWAY_CUSTOM_DOMAINS_FILE"
+}
+
+load_custom_domains
 
 # ── Cleanup trap — rolls back on unexpected failure ───────────────────────────
 _INSTALL_SUCCESS=false
@@ -77,6 +106,11 @@ preflight() {
     echo -e "   • Modify ${BOLD}/etc/systemd/resolved.conf${RESET} (backed up first)"
     echo -e "   • Stop conflicting DNS services (dnsmasq, bind9) if found\n"
 
+    if [[ "${AIWAY_YES:-0}" == "1" || "${AIWAY_NONINTERACTIVE:-0}" == "1" ]]; then
+        print_info "Non-interactive mode enabled: continuing automatically"
+        return
+    fi
+
     read -rp "  Continue? [y/N] " confirm
     [[ "${confirm,,}" == "y" ]] || { echo "Aborted."; exit 0; }
 }
@@ -84,6 +118,13 @@ preflight() {
 # ── Gather inputs ─────────────────────────────────────────────────────────────
 gather_inputs() {
     print_step "Configuration"
+
+    mkdir -p "$AIWAY_ETC_DIR"
+
+    if [[ -f "$AIWAY_INSTALLER_ENV" ]]; then
+        # shellcheck source=/dev/null
+        source "$AIWAY_INSTALLER_ENV"
+    fi
 
     # --- VPS public IP (try 3 sources, strip whitespace) ---
     local detected_ip=""
@@ -95,13 +136,29 @@ gather_inputs() {
     )
     detected_ip="${detected_ip//[[:space:]]/}"
 
+    VPS_IP="${AIWAY_VPS_IP:-${VPS_IP:-}}"
+    DOT_DOMAIN="${AIWAY_DOT_DOMAIN:-${DOT_DOMAIN:-}}"
+    ACME_EMAIL="${AIWAY_ACME_EMAIL:-${ACME_EMAIL:-}}"
+
     echo ""
-    if [[ -n "$detected_ip" ]]; then
-        echo -e "  Detected public IP: ${BOLD}${detected_ip}${RESET}"
-        read -rp "  VPS public IP [${detected_ip}]: " VPS_IP
-        VPS_IP="${VPS_IP:-$detected_ip}"
+    if [[ -z "$VPS_IP" ]]; then
+        if [[ -n "$detected_ip" ]]; then
+            echo -e "  Detected public IP: ${BOLD}${detected_ip}${RESET}"
+            if [[ "${AIWAY_NONINTERACTIVE:-0}" == "1" ]]; then
+                VPS_IP="$detected_ip"
+            else
+                read -rp "  VPS public IP [${detected_ip}]: " VPS_IP
+                VPS_IP="${VPS_IP:-$detected_ip}"
+            fi
+        else
+            if [[ "${AIWAY_NONINTERACTIVE:-0}" == "1" ]]; then
+                print_error "AIWAY_VPS_IP is required in non-interactive mode"
+                exit 1
+            fi
+            read -rp "  VPS public IP: " VPS_IP
+        fi
     else
-        read -rp "  VPS public IP: " VPS_IP
+        print_info "Using saved/configured VPS IP: ${VPS_IP}"
     fi
 
     # Validate — loop until valid
@@ -115,14 +172,20 @@ gather_inputs() {
     echo ""
     echo -e "  ${DIM}Optional: a domain pointing to this server enables DoT (port 853) and DoH.${RESET}"
     echo -e "  ${DIM}Without a domain, plain DNS on port 53 still works on all devices.${RESET}\n"
-    read -rp "  Domain for DoT/DoH (blank to skip): " DOT_DOMAIN
+
+    if [[ -z "$DOT_DOMAIN" && "${AIWAY_NONINTERACTIVE:-0}" != "1" ]]; then
+        read -rp "  Domain for DoT/DoH (blank to skip): " DOT_DOMAIN
+    fi
     DOT_DOMAIN="${DOT_DOMAIN:-}"
     DOT_DOMAIN="${DOT_DOMAIN#https://}"; DOT_DOMAIN="${DOT_DOMAIN#http://}"; DOT_DOMAIN="${DOT_DOMAIN%/}"
 
     if [[ -n "$DOT_DOMAIN" ]]; then
         print_ok "DoT/DoH domain: ${DOT_DOMAIN}"
-        read -rp "  Email for Let's Encrypt: " ACME_EMAIL
+        if [[ -z "$ACME_EMAIL" && "${AIWAY_NONINTERACTIVE:-0}" != "1" ]]; then
+            read -rp "  Email for Let's Encrypt: " ACME_EMAIL
+        fi
         while [[ -z "$ACME_EMAIL" ]]; do
+            [[ "${AIWAY_NONINTERACTIVE:-0}" == "1" ]] && { print_error "AIWAY_ACME_EMAIL is required when AIWAY_DOT_DOMAIN is set"; exit 1; }
             print_error "Email required for ACME certificate."
             read -rp "  Email for Let's Encrypt: " ACME_EMAIL
         done
@@ -131,6 +194,28 @@ gather_inputs() {
         print_warn "No domain — skipping DoT/DoH."
         ACME_EMAIL=""
     fi
+}
+
+install_runtime_assets() {
+    print_step "Installing aiway runtime assets"
+
+    mkdir -p "$AIWAY_RUNTIME_DIR/lib"
+
+    install -m 755 "$SCRIPT_DIR/install.sh" "$AIWAY_RUNTIME_DIR/install.sh"
+    install -m 755 "$SCRIPT_DIR/uninstall.sh" "$AIWAY_RUNTIME_DIR/uninstall.sh"
+    install -m 644 "$SCRIPT_DIR/lib/utils.sh" "$AIWAY_RUNTIME_DIR/lib/utils.sh"
+    install -m 644 "$SCRIPT_DIR/lib/domains.sh" "$AIWAY_RUNTIME_DIR/lib/domains.sh"
+    install -m 755 "$SCRIPT_DIR/server/aiwayctl.sh" "$AIWAY_CTL_TARGET"
+
+    cat > "$AIWAY_INSTALLER_ENV" <<EOF
+AIWAY_VPS_IP="${VPS_IP}"
+AIWAY_DOT_DOMAIN="${DOT_DOMAIN}"
+AIWAY_ACME_EMAIL="${ACME_EMAIL}"
+EOF
+
+    touch "$AIWAY_CUSTOM_DOMAINS_FILE"
+    print_ok "Runtime assets installed in ${AIWAY_RUNTIME_DIR}"
+    print_ok "CLI installed at ${AIWAY_CTL_TARGET}"
 }
 
 # ── Free up port 53 ───────────────────────────────────────────────────────────
@@ -658,12 +743,15 @@ print_summary() {
     echo -e "  ${DIM}  docker logs -f blocky              # live DNS logs${RESET}"
     echo -e "  ${DIM}  systemctl status angie             # proxy status${RESET}"
     echo -e "  ${DIM}  dig openai.com @${VPS_IP}          # test DNS resolution${RESET}"
+    echo -e "  ${DIM}  aiwayctl status                    # machine-readable status${RESET}"
+    echo -e "  ${DIM}  aiwayctl doctor                    # connectivity + service checks${RESET}"
+    echo -e "  ${DIM}  aiwayctl add-domain example.com    # add extra proxied service${RESET}"
     echo -e "  ${DIM}  sudo bash ${SCRIPT_DIR}/uninstall.sh   # remove aiway${RESET}\n"
 }
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 main() {
-    clear
+    [[ "${AIWAY_NO_CLEAR:-0}" == "1" ]] || clear
     print_banner
     preflight
     gather_inputs
@@ -682,6 +770,7 @@ main() {
     start_blocky
     start_angie
     configure_firewall
+    install_runtime_assets
 
     _INSTALL_SUCCESS=true   # disarm cleanup trap
     print_summary

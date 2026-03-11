@@ -34,6 +34,17 @@ sudo bash install.sh
 
 Всё. Скрипт сам установит зависимости, всё настроит и в конце выведет IP, который нужно прописать в DNS на роутере/телефоне/ноутбуке.
 
+## Keenetic dashboard
+
+В репозитории теперь есть отдельный роутерный контур: `AIWAY Manager` для Keenetic / Entware.
+
+- AWG-inspired веб-панель на самом роутере
+- установка `aiway` на новые VPS через SSH прямо из GUI
+- `install / sync / reset / uninstall` без ручной возни в админке Keenetic
+- health-check, fail-safe, кастомные домены и LAN-friendly CLI/API
+
+Подробности: [`docs/keenetic-dashboard.md`](docs/keenetic-dashboard.md) и подпроект [`router/`](router/).
+
 ---
 
 ## Как это работает
@@ -380,6 +391,7 @@ ss -tlnp | grep :443
 | Файл | Содержание |
 |:--|:--|
 | [как-это-работает.md](docs/как-это-работает.md) | Технический разбор SNI proxy и DNS, архитектура, ECH, QUIC |
+| [keenetic-dashboard.md](docs/keenetic-dashboard.md) | Дашборд на роутере, CLI/API, Entware-пакет, управление VPS через SSH |
 | [устройства.md](docs/устройства.md) | Настройка DNS на роутере, Android, iOS, macOS, Windows, Linux |
 | [диагностика.md](docs/диагностика.md) | Что делать если не работает, типичные ошибки, полезные команды |
 | [faq.md](docs/faq.md) | Ответы на частые вопросы |

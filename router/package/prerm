@@ -1,0 +1,4 @@
+#!/bin/sh
+
+/opt/etc/init.d/S99aiway-manager stop 2>/dev/null || true
+exit 0

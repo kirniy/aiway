@@ -13,6 +13,7 @@ ANGIE_CONF="/etc/angie/angie.conf"
 ANGIE_STREAM_FILE="/etc/angie/stream.d/ai-proxy.conf"
 ANGIE_HTTP_FILE="/etc/angie/http.d/local-services.conf"
 BLOCKY_DIR="/opt/blocky"
+AIWAY_ETC_DIR="/etc/aiway"
 
 print_banner() {
     echo -e "${RED}${BOLD}"
@@ -30,7 +31,7 @@ EOF
 }
 
 main() {
-    clear
+    [[ "${AIWAY_NO_CLEAR:-0}" == "1" ]] || clear
     print_banner
     check_root
 
@@ -39,8 +40,10 @@ main() {
     echo -e "   • Angie config files created by aiway"
     echo -e "   • Restore systemd-resolved stub listener\n"
 
-    read -rp "  Are you sure? [y/N] " confirm
-    [[ "${confirm,,}" == "y" ]] || { echo "Aborted."; exit 0; }
+    if [[ "${AIWAY_YES:-0}" != "1" ]]; then
+        read -rp "  Are you sure? [y/N] " confirm
+        [[ "${confirm,,}" == "y" ]] || { echo "Aborted."; exit 0; }
+    fi
 
     # ── Blocky ───────────────────────────────────────────────────────────
     print_step "Removing Blocky"
@@ -124,6 +127,13 @@ DEFAULTEOF
         done
         print_ok "Removed aiway ufw rules (if they existed)"
     fi
+
+    if [[ -d "$AIWAY_ETC_DIR" ]]; then
+        rm -rf "$AIWAY_ETC_DIR"
+        print_ok "Removed ${AIWAY_ETC_DIR}"
+    fi
+
+    rm -f /usr/local/bin/aiwayctl
 
     echo ""
     echo -e "${GREEN}${BOLD}  aiway has been removed.${RESET}"
