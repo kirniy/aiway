@@ -100,7 +100,23 @@ type OverviewResponse struct {
 	Statuses      map[string]*ProfileStatus `json:"statuses"`
 	Logs          []LogEntry                `json:"logs"`
 	ActiveProfile *Profile                  `json:"activeProfile,omitempty"`
+	RouterDNS     RouterDNSState            `json:"routerDns"`
+	Version       string                    `json:"version"`
 	GeneratedAt   string                    `json:"generatedAt"`
+}
+
+type RouterDNSState struct {
+	Active  bool   `json:"active"`
+	Address string `json:"address"`
+	SNI     string `json:"sni"`
+}
+
+type UpdateInfo struct {
+	Current   string `json:"current"`
+	Latest    string `json:"latest"`
+	Available bool   `json:"available"`
+	Package   string `json:"package,omitempty"`
+	URL       string `json:"url,omitempty"`
 }
 
 type ProfileActionRequest struct {
@@ -167,4 +183,22 @@ func cloneStrings(values []string) []string {
 		return []string{}
 	}
 	return append([]string(nil), values...)
+}
+
+func mergeStrings(values ...[]string) []string {
+	seen := map[string]struct{}{}
+	merged := []string{}
+	for _, group := range values {
+		for _, value := range group {
+			if value == "" {
+				continue
+			}
+			if _, ok := seen[value]; ok {
+				continue
+			}
+			seen[value] = struct{}{}
+			merged = append(merged, value)
+		}
+	}
+	return merged
 }

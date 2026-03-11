@@ -90,5 +90,19 @@ export type OverviewResponse = {
   statuses: Record<string, ProfileStatus>
   logs: LogEntry[]
   activeProfile?: Profile
+  routerDns: {
+    active: boolean
+    address: string
+    sni: string
+  }
+  version: string
   generatedAt: string
+}
+
+export type UpdateInfo = {
+  current: string
+  latest: string
+  available: boolean
+  package?: string
+  url?: string
 }

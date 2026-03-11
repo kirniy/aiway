@@ -4,6 +4,32 @@ set -e
 REPO="kirniy/aiway"
 TMP_DIR="/tmp/aiway-manager-install"
 
+fetch_text() {
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$1"
+    return
+  fi
+  if command -v wget >/dev/null 2>&1; then
+    wget -qO- "$1"
+    return
+  fi
+  echo "Need curl or wget" >&2
+  exit 1
+}
+
+fetch_file() {
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL -o "$2" "$1"
+    return
+  fi
+  if command -v wget >/dev/null 2>&1; then
+    wget -qO "$2" "$1"
+    return
+  fi
+  echo "Need curl or wget" >&2
+  exit 1
+}
+
 cleanup() {
   rm -rf "$TMP_DIR"
 }
@@ -15,7 +41,7 @@ detect_arch() {
 }
 
 fetch_version() {
-  VERSION=$(curl -sI "https://github.com/$REPO/releases/latest" | sed -n 's/^[Ll]ocation:.*\/v\([^ \t\r]*\).*/\1/p' | tr -d '\r\n')
+  VERSION=$(fetch_text "https://api.github.com/repos/$REPO/releases/latest" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\([^"]*\)".*/\1/p' | sed -n '1p')
   [ -n "$VERSION" ] || { echo "Cannot detect latest release" >&2; exit 1; }
 }
 
@@ -24,7 +50,7 @@ install_pkg() {
   URL="https://github.com/$REPO/releases/download/v${VERSION}/${PKG}"
 
   mkdir -p "$TMP_DIR"
-  curl -fL -o "$TMP_DIR/$PKG" "$URL"
+  fetch_file "$URL" "$TMP_DIR/$PKG"
   opkg install "$TMP_DIR/$PKG"
 }
 

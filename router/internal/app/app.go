@@ -20,6 +20,7 @@ type App struct {
 	store     *Store
 	runner    SSHRunner
 	router    RouterController
+	updater   Updater
 	mu        sync.Mutex
 	web       http.Handler
 }
@@ -40,6 +41,7 @@ func New(configDir string) (*App, error) {
 		store:     store,
 		runner:    SSHRunner{},
 		router:    NewRouterController(configDir),
+		updater:   NewUpdater(),
 		web:       http.FileServer(http.FS(distFS)),
 	}, nil
 }
@@ -88,6 +90,8 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("/api/actions/profile/uninstall", a.handleProfileUninstall)
 	mux.HandleFunc("/api/actions/profile/reset", a.handleProfileReset)
 	mux.HandleFunc("/api/actions/profile/sync", a.handleProfileSync)
+	mux.HandleFunc("/api/actions/update/check", a.handleUpdateCheck)
+	mux.HandleFunc("/api/actions/update/apply", a.handleUpdateApply)
 	mux.HandleFunc("/", a.handleSPA)
 	return loggingMiddleware(mux)
 }
@@ -108,7 +112,11 @@ func (a *App) handleOverview(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w)
 		return
 	}
-	writeJSON(w, http.StatusOK, a.store.Snapshot())
+	snapshot := a.store.Snapshot()
+	if address, sni, err := a.router.CurrentTLSState(); err == nil {
+		snapshot.RouterDNS = RouterDNSState{Active: address != "" || sni != "", Address: address, SNI: sni}
+	}
+	writeJSON(w, http.StatusOK, snapshot)
 }
 
 func (a *App) handleConfig(w http.ResponseWriter, r *http.Request) {
@@ -316,6 +324,33 @@ func (a *App) handleProfileAction(w http.ResponseWriter, r *http.Request, action
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "output": output, "status": status})
 }
 
+func (a *App) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	info, err := a.updater.Check()
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, info)
+}
+
+func (a *App) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	info, err := a.updater.Apply()
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err)
+		return
+	}
+	_ = a.store.AppendLog("info", fmt.Sprintf("Запущено обновление панели до %s", info.Latest))
+	writeJSON(w, http.StatusOK, info)
+}
+
 func (a *App) runActiveCheck(reason string) (*ProfileStatus, error) {
 	profile, ok := a.store.ActiveProfile()
 	if !ok {
@@ -333,7 +368,7 @@ func (a *App) checkProfile(profile Profile, reason string) (*ProfileStatus, erro
 	status.EffectiveDNSOn = status.DesiredDNSOn && !a.store.Config().Routing.FailsafeActive
 	status.LastCheckAt = nowRFC3339()
 	status.CustomDomains = cloneStrings(a.store.Config().Routing.CustomDomains)
-	status.ServiceCount = len(a.store.Config().Routing.Services) + len(status.CustomDomains)
+	status.ServiceCount = enabledDomainCount(a.store.Config())
 	config := a.store.Config()
 	address, sni := dnsTarget(config, profile)
 
@@ -402,8 +437,10 @@ func (a *App) checkProfile(profile Profile, reason string) (*ProfileStatus, erro
 	remoteStatus.LastCheckAt = nowRFC3339()
 	remoteStatus.LastSuccessAt = nowRFC3339()
 	remoteStatus.ConsecutiveFailures = 0
-	remoteStatus.CustomDomains = cloneStrings(a.store.Config().Routing.CustomDomains)
-	remoteStatus.ServiceCount = len(a.store.Config().Routing.Services) + len(remoteStatus.CustomDomains)
+	remoteStatus.CustomDomains = mergeStrings(remoteStatus.CustomDomains, a.store.Config().Routing.CustomDomains)
+	if remoteStatus.ServiceCount == 0 {
+		remoteStatus.ServiceCount = enabledDomainCount(a.store.Config())
+	}
 
 	if a.store.Config().Routing.FailsafeActive && a.store.Config().Safety.AutoRecover {
 		if _, err := a.router.EnsureDNSState(address, sni, true); err == nil {
@@ -465,6 +502,30 @@ func dnsTarget(config Config, profile Profile) (string, string) {
 
 func profileCanManage(profile Profile) bool {
 	return strings.TrimSpace(profile.Host) != ""
+}
+
+func enabledDomainCount(config Config) int {
+	seen := map[string]struct{}{}
+	for _, service := range config.Routing.Services {
+		if !service.Enabled {
+			continue
+		}
+		for _, domain := range service.Domains {
+			domain = strings.TrimSpace(domain)
+			if domain == "" {
+				continue
+			}
+			seen[domain] = struct{}{}
+		}
+	}
+	for _, domain := range config.Routing.CustomDomains {
+		domain = strings.TrimSpace(domain)
+		if domain == "" {
+			continue
+		}
+		seen[domain] = struct{}{}
+	}
+	return len(seen)
 }
 
 func (a *App) handleSPA(w http.ResponseWriter, r *http.Request) {

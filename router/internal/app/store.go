@@ -148,7 +148,7 @@ func (s *Store) Snapshot() OverviewResponse {
 		statuses[id] = &clone
 	}
 
-	profiles := append([]Profile(nil), s.config.Profiles...)
+	profiles := sanitizeProfiles(s.config.Profiles)
 	logs := append([]LogEntry(nil), s.logs...)
 	configCopy := s.config
 	configCopy.Profiles = profiles
@@ -166,6 +166,7 @@ func (s *Store) Snapshot() OverviewResponse {
 		Profiles:    profiles,
 		Statuses:    statuses,
 		Logs:        logs,
+		Version:     Version,
 		GeneratedAt: nowRFC3339(),
 	}
 	for _, profile := range profiles {
@@ -182,7 +183,7 @@ func (s *Store) Config() Config {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	configCopy := s.config
-	configCopy.Profiles = append([]Profile(nil), s.config.Profiles...)
+	configCopy.Profiles = sanitizeProfiles(s.config.Profiles)
 	configCopy.Routing.CustomDomains = cloneStrings(s.config.Routing.CustomDomains)
 	configCopy.Routing.Services = append([]ServiceToggle(nil), s.config.Routing.Services...)
 	if configCopy.Routing.CustomDomains == nil {
@@ -213,11 +214,44 @@ func (s *Store) UpdateConfig(next Config) error {
 	if next.ActiveID == "" {
 		next.ActiveID = next.Profiles[0].ID
 	}
+	mergeProfileSecrets(s.config.Profiles, next.Profiles)
 
 	s.config = next
 	s.normalizeLocked()
 	s.pruneStatuses()
 	return s.saveLocked()
+}
+
+func sanitizeProfiles(profiles []Profile) []Profile {
+	copyProfiles := append([]Profile(nil), profiles...)
+	for i := range copyProfiles {
+		copyProfiles[i].Password = ""
+		copyProfiles[i].PrivateKey = ""
+		copyProfiles[i].SudoPassword = ""
+	}
+	return copyProfiles
+}
+
+func mergeProfileSecrets(existing []Profile, next []Profile) {
+	existingByID := map[string]Profile{}
+	for _, profile := range existing {
+		existingByID[profile.ID] = profile
+	}
+	for i := range next {
+		current, ok := existingByID[next[i].ID]
+		if !ok {
+			continue
+		}
+		if next[i].Password == "" {
+			next[i].Password = current.Password
+		}
+		if next[i].PrivateKey == "" {
+			next[i].PrivateKey = current.PrivateKey
+		}
+		if next[i].SudoPassword == "" {
+			next[i].SudoPassword = current.SudoPassword
+		}
+	}
 }
 
 func (s *Store) SetDNSDesired(enabled bool) error {

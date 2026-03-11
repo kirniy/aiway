@@ -36,9 +36,27 @@ func main() {
 		dnsCmd(os.Args[2:])
 	case "profiles":
 		profilesCmd(os.Args[2:])
+	case "update":
+		updateCmd(os.Args[2:])
 	default:
 		serveCmd(os.Args[1:])
 	}
+}
+
+func updateCmd(args []string) {
+	if len(args) == 0 {
+		fmt.Println("usage: aiway-manager update <check|apply>")
+		os.Exit(1)
+	}
+	path := map[string]string{
+		"check": "/api/actions/update/check",
+		"apply": "/api/actions/update/apply",
+	}[args[0]]
+	if path == "" {
+		fmt.Println("usage: aiway-manager update <check|apply>")
+		os.Exit(1)
+	}
+	apiCmd(args[1:], http.MethodPost, path, map[string]any{})
 }
 
 func serveCmd(args []string) {

@@ -90,10 +90,13 @@ func (r SSHRunner) RemoteStatus(profile Profile) (ProfileStatus, error) {
 		return ProfileStatus{}, err
 	}
 	var payload struct {
-		Angie     string `json:"angie"`
-		Blocky    string `json:"blocky"`
-		VPSIP     string `json:"vpsIp"`
-		DotDomain string `json:"dotDomain"`
+		Angie     string   `json:"angie"`
+		Blocky    string   `json:"blocky"`
+		VPSIP     string   `json:"vpsIp"`
+		DotDomain string   `json:"dotDomain"`
+		Mode      string   `json:"managementMode"`
+		Extra     []string `json:"extraDomains"`
+		Count     int      `json:"domainCount"`
 	}
 	if err := json.Unmarshal([]byte(strings.TrimSpace(result.Stdout)), &payload); err != nil {
 		return ProfileStatus{}, err
@@ -109,8 +112,17 @@ func (r SSHRunner) RemoteStatus(profile Profile) (ProfileStatus, error) {
 		LastCheckAt:   nowRFC3339(),
 		LastSuccessAt: nowRFC3339(),
 		InstallState:  "installed",
-		CustomDomains: cloneStrings(profile.CustomDomains),
-		ServiceCount:  len(profile.CustomDomains),
+		CustomDomains: cloneStrings(payload.Extra),
+		ServiceCount:  payload.Count,
+	}
+	if len(status.CustomDomains) == 0 {
+		status.CustomDomains = cloneStrings(profile.CustomDomains)
+	}
+	if status.ServiceCount == 0 {
+		status.ServiceCount = len(status.CustomDomains)
+	}
+	if strings.TrimSpace(payload.Mode) != "" {
+		status.InstallState = payload.Mode
 	}
 	if doctorErr == nil {
 		status.LastDoctor = doctor

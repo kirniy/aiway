@@ -1,0 +1,26 @@
+[DEFAULT]
+banaction = ufw
+backend = systemd
+bantime = 1d
+findtime = 10m
+maxretry = 3
+bantime.increment = true
+bantime.factor = 2
+bantime.maxtime = 4w
+bantime.rndtime = 15m
+
+[sshd]
+enabled = true
+mode = aggressive
+port = ssh
+maxretry = 3
+findtime = 10m
+bantime = 1w
+
+[recidive]
+enabled = true
+logpath = /var/log/fail2ban.log
+banaction = ufw
+findtime = 1d
+bantime = 4w
+maxretry = 5

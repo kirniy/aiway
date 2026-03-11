@@ -67,4 +67,14 @@ export const api = {
     request('/api/logs', {
       method: 'DELETE',
     }),
+  checkUpdate: () =>
+    request('/api/actions/update/check', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+  applyUpdate: () =>
+    request('/api/actions/update/apply', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
 }

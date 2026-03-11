@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from './api'
-import type { Config, OverviewResponse, Profile, ProfileStatus } from './types'
+import type { Config, OverviewResponse, Profile, ProfileStatus, UpdateInfo } from './types'
 
 type RouteKey = '/routing' | '/safety' | '/diagnostics' | '/settings'
 
@@ -22,6 +22,7 @@ function App() {
   const [draftConfig, setDraftConfig] = useState<Config | null>(null)
   const [error, setError] = useState('')
   const [newDomain, setNewDomain] = useState('')
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
 
   const refresh = async () => {
     try {
@@ -69,14 +70,25 @@ function App() {
 		return <div className="screen-loading">Загружаю AIWAY Manager...</div>
 	}
 
-	const customDomains = draftConfig.routing.customDomains ?? []
+	const customDomains = activeStatus?.customDomains?.length ? activeStatus.customDomains : (draftConfig.routing.customDomains ?? [])
 	const logs = overview.logs ?? []
 	const dnsEndpoint = draftConfig.routing.upstreamAddress || activeProfile?.host || 'Не задан'
 	const dnsSni = draftConfig.routing.upstreamSni || activeProfile?.domain || 'Не задан'
+	const actualDnsOn = Boolean(overview.routerDns?.active)
+	const actualDnsEndpoint = overview.routerDns?.address || dnsEndpoint
+	const actualDnsSni = overview.routerDns?.sni || dnsSni
+	const enabledDomainCount = activeStatus?.serviceCount || Array.from(
+		new Set([
+			...draftConfig.routing.services.filter((service) => service.enabled).flatMap((service) => service.domains),
+			...customDomains,
+		]),
+	).length
 
-	const dnsWanted = draftConfig.routing.desiredDnsOn
   const failsafe = draftConfig.routing.failsafeActive
 	const managedProfile = Boolean(activeProfile?.host?.trim())
+	const canManageVps = Boolean(managedProfile && activeStatus?.reachable)
+	const canManageDomains = Boolean(canManageVps)
+	const canMutateManagedVps = Boolean(canManageVps && activeStatus?.installState !== 'legacy')
 
   return (
     <div className="shell">
@@ -94,7 +106,7 @@ function App() {
               </svg>
               <span className="logo-text">AIWAY Manager</span>
             </a>
-            <span className="version-badge">v0.1.1</span>
+            <span className="version-badge">v{overview.version}</span>
           </div>
 
           <nav className="topbar-nav">
@@ -115,19 +127,17 @@ function App() {
 
           <div className="topbar-actions">
             <span className={`status-pill ${activeStatus?.reachable ? 'ok' : 'bad'}`}>
-              {managedProfile ? (activeStatus?.reachable ? 'VPS на связи' : 'Нет SSH') : 'DNS-only'}
+              {managedProfile ? (activeStatus?.reachable ? 'SSH OK' : 'SSH ERR') : 'DNS'}
             </span>
-            <span className={`status-pill ${failsafe ? 'warn' : 'muted'}`}>
-              {failsafe ? 'Фейлсейф' : 'Нормально'}
-            </span>
+            {failsafe && <span className="status-pill warn">SAFE</span>}
             <button className="icon-button" title="Проверить сейчас" onClick={() => void run('check', () => api.checkNow())}>
               ↻
             </button>
             <button
-              className={`dns-toggle-inline ${dnsWanted && !failsafe ? 'on' : 'off'}`}
-              title={dnsWanted ? 'Отключить DNS-трюк' : 'Включить DNS-трюк'}
-              onClick={() => void run('dns', () => api.toggleDns(!dnsWanted))}
-              aria-pressed={dnsWanted && !failsafe}
+              className={`dns-toggle-inline ${actualDnsOn && !failsafe ? 'on' : 'off'}`}
+              title={actualDnsOn ? 'Отключить DNS-трюк' : 'Включить DNS-трюк'}
+              onClick={() => void run('dns', () => api.toggleDns(!actualDnsOn))}
+              aria-pressed={actualDnsOn && !failsafe}
             >
               <span className="dns-toggle-label">AIWAY DNS</span>
               <span className="dns-toggle-switch" aria-hidden="true">
@@ -143,19 +153,19 @@ function App() {
         <section className="overview-strip">
           <OverviewCard
             label="Режим"
-            value={activeStatus?.effectiveDnsOn ? 'AIWAY DNS активен' : 'AIWAY DNS выключен'}
+            value={actualDnsOn ? 'AIWAY DNS активен' : 'AIWAY DNS выключен'}
             detail={failsafe ? 'Фейлсейф ограничивает трафик' : 'Маршрутится через основной WAN'}
           />
-          <OverviewCard label="Endpoint" value={dnsEndpoint} detail={`SNI: ${dnsSni}`} />
+          <OverviewCard label="Endpoint" value={actualDnsEndpoint} detail={`SNI: ${actualDnsSni}`} />
           <OverviewCard
             label="Проверка"
             value={activeStatus?.lastSuccessAt ? formatDate(activeStatus.lastSuccessAt) : 'Еще не было'}
             detail={`Ошибок подряд: ${activeStatus?.consecutiveFailures ?? 0}`}
           />
           <OverviewCard
-            label="Управление"
-            value={`${draftConfig.routing.services.filter((service) => service.enabled).length + customDomains.length} сервисов`}
-            detail="GUI, CLI и локальная автоматизация"
+            label="Домены"
+            value={`${enabledDomainCount}`}
+            detail="сейчас идут через aiway"
           />
         </section>
 
@@ -169,31 +179,31 @@ function App() {
             <section className="content-grid">
               <article className="panel panel-main">
                 <div className="dns-hero">
-                  <div>
-                    <span className="panel-kicker">Главный контур</span>
-                    <h2>AIWAY DNS</h2>
-                    <p className="dns-hero-copy">Панель направляет DNS на внешний или управляемый aiway endpoint, но всегда закрепляет маршрут до него через основной интернет-канал роутера.</p>
-                  </div>
+              <div>
+                <span className="panel-kicker">Главный контур</span>
+                <h2>AIWAY DNS</h2>
+                <p className="dns-hero-copy">Панель направляет DNS на внешний или управляемый aiway endpoint, но всегда закрепляет маршрут до него через основной интернет-канал роутера.</p>
+              </div>
                   <button
-                    className={`btn dns-hero-button ${dnsWanted && !failsafe ? 'btn-danger' : 'btn-primary'}`}
-                    onClick={() => void run('dns', () => api.toggleDns(!dnsWanted))}
+                    className={`btn dns-hero-button ${actualDnsOn && !failsafe ? 'btn-danger' : 'btn-primary'}`}
+                    onClick={() => void run('dns', () => api.toggleDns(!actualDnsOn))}
                   >
-                    {dnsWanted && !failsafe ? 'Отключить AIWAY DNS' : 'Включить AIWAY DNS'}
+                    {actualDnsOn && !failsafe ? 'Отключить AIWAY DNS' : 'Включить AIWAY DNS'}
                   </button>
                 </div>
 
                 <div className="detail-grid">
                   <div className="detail-box">
                     <span>Endpoint</span>
-                    <strong>{dnsEndpoint}</strong>
+                    <strong>{actualDnsEndpoint}</strong>
                   </div>
                   <div className="detail-box">
                     <span>SNI / DoT</span>
-                    <strong>{dnsSni}</strong>
+                    <strong>{actualDnsSni}</strong>
                   </div>
                   <div className="detail-box">
                     <span>Состояние</span>
-                    <strong>{activeStatus?.effectiveDnsOn ? 'Активно' : 'Неактивно'}</strong>
+                    <strong>{actualDnsOn ? 'Активно' : 'Неактивно'}</strong>
                   </div>
                 </div>
 
@@ -238,55 +248,66 @@ function App() {
               </article>
 
               <aside className="sidebar-stack">
-                <article className="panel panel-side">
-                  <div className="panel-head compact">
-                    <div>
-                      <span className="panel-kicker">Кастомные домены</span>
-                      <h2>Свои сервисы</h2>
-                    </div>
-                  </div>
-                  <div className="inline-form">
-                    <input value={newDomain} onChange={(event) => setNewDomain(event.target.value)} placeholder="example-ai.com" disabled={!managedProfile} />
-                    <button
-                      className="btn btn-primary"
-                      disabled={!managedProfile}
-                      onClick={() => {
-                        if (!newDomain.trim()) return
-                        void run('add-domain', () => api.addDomain(newDomain.trim()))
-                        setNewDomain('')
-                      }}
-                  >
-                    Добавить
-                  </button>
-                  </div>
-                  {!managedProfile && <p className="muted">Чтобы управлять кастомными доменами, нужен SSH-профиль VPS. В DNS-only режиме эта секция только для просмотра.</p>}
-                  <div className="chips-stack">
-                    {customDomains.length === 0 && <p className="muted">Кастомных доменов пока нет.</p>}
-                    {customDomains.map((domain) => (
-                      <div key={domain} className="chip-row">
-                        <span>{domain}</span>
-                        <button className="ghost-link" disabled={!managedProfile} onClick={() => void run('remove-domain', () => api.removeDomain(domain))}>
-                          Удалить
-                        </button>
+                {canManageDomains ? (
+                  <article className="panel panel-side">
+                    <div className="panel-head compact">
+                      <div>
+                        <span className="panel-kicker">Кастомные домены</span>
+                        <h2>{activeStatus?.installState === 'legacy' ? 'Свои сервисы (legacy)' : 'Свои сервисы'}</h2>
                       </div>
-                    ))}
-                  </div>
-                  <button className="btn btn-secondary btn-full" onClick={() => void run('save-config', () => api.saveConfig(draftConfig))}>
-                    Сохранить маршрутизацию
-                  </button>
-                </article>
+                    </div>
+                    <div className="inline-form">
+                      <input value={newDomain} onChange={(event) => setNewDomain(event.target.value)} placeholder="example-ai.com" />
+                      <button
+                        className="btn btn-primary"
+                        onClick={() => {
+                          if (!newDomain.trim()) return
+                          void run('add-domain', () => api.addDomain(newDomain.trim()))
+                          setNewDomain('')
+                        }}
+                      >
+                        Добавить
+                      </button>
+                    </div>
+                    {activeStatus?.installState === 'legacy' && <p className="muted">Для этого VPS панель меняет существующие legacy-конфиги Angie и Blocky точечно, без полной переустановки.</p>}
+                    <div className="chips-stack">
+                      {customDomains.length === 0 && <p className="muted">Кастомных доменов пока нет.</p>}
+                      {customDomains.map((domain) => (
+                        <div key={domain} className="chip-row">
+                          <span>{domain}</span>
+                          <button className="ghost-link" onClick={() => void run('remove-domain', () => api.removeDomain(domain))}>
+                            Удалить
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <button className="btn btn-secondary btn-full" onClick={() => void run('save-config', () => api.saveConfig(draftConfig))}>
+                      Сохранить маршрутизацию
+                    </button>
+                  </article>
+                ) : (
+                  <article className="panel panel-side">
+                    <div className="panel-head compact">
+                      <div>
+                        <span className="panel-kicker">Кастомные домены</span>
+                        <h2>{canManageVps ? 'Только чтение' : 'Нужен доступный VPS'}</h2>
+                      </div>
+                    </div>
+                    <p className="muted">{canManageVps ? 'Этот VPS подключен в режиме бережного legacy-управления. Статус и проверки доступны, но изменение доменов скрыто, чтобы не ломать существующую ручную конфигурацию.' : 'Добавление и удаление собственных доменов работает только когда активный VPS-профиль доступен по SSH. Для DNS-only режима эта секция скрыта специально, чтобы не вводить в заблуждение.'}</p>
+                  </article>
+                )}
 
                 <article className="panel panel-side">
                   <div className="panel-head compact">
-                    <div>
-                      <span className="panel-kicker">Быстрый статус</span>
-                      <h2>Что важно сейчас</h2>
+                      <div>
+                        <span className="panel-kicker">Быстрый статус</span>
+                        <h2>Что важно сейчас</h2>
                     </div>
                   </div>
                   <div className="health-matrix compact-health">
                     <HealthRow label="VPS / endpoint" ok={Boolean(activeStatus?.reachable)} detail={activeStatus?.lastError || 'Доступен'} />
                     <HealthRow label="Фейлсейф" ok={!failsafe} detail={failsafe ? 'Ограничивает маршрут' : 'Не активирован'} />
-                    <HealthRow label="DNS режим" ok={Boolean(activeStatus?.effectiveDnsOn)} detail={activeStatus?.effectiveDnsOn ? 'Трафик направлен через aiway' : 'Используется обычный DNS'} />
+                    <HealthRow label="DNS режим" ok={actualDnsOn} detail={actualDnsOn ? 'Роутер реально использует aiway DNS' : 'Используется обычный DNS'} />
                   </div>
                 </article>
               </aside>
@@ -425,12 +446,12 @@ function App() {
                   </div>
                 </div>
                 <div className="action-grid">
-                  <ActionButton label="Установить на VPS" accent="primary" disabled={!managedProfile} onClick={() => activeProfile && void run('install', () => api.profileInstall(activeProfile.id))} />
-                  <ActionButton label="Пере применить конфиг" accent="secondary" disabled={!managedProfile} onClick={() => activeProfile && void run('sync', () => api.profileSync(activeProfile.id))} />
-                  <ActionButton label="Сбросить кастомные домены" accent="secondary" disabled={!managedProfile} onClick={() => activeProfile && void run('reset', () => api.profileReset(activeProfile.id))} />
-                  <ActionButton label="Полностью удалить aiway" accent="danger" disabled={!managedProfile} onClick={() => activeProfile && void run('uninstall', () => api.profileUninstall(activeProfile.id))} />
+                  <ActionButton label="Установить на VPS" accent="primary" disabled={!canMutateManagedVps} onClick={() => activeProfile && void run('install', () => api.profileInstall(activeProfile.id))} />
+                  <ActionButton label="Пере применить конфиг" accent="secondary" disabled={!canMutateManagedVps} onClick={() => activeProfile && void run('sync', () => api.profileSync(activeProfile.id))} />
+                  <ActionButton label="Сбросить кастомные домены" accent="secondary" disabled={!canMutateManagedVps} onClick={() => activeProfile && void run('reset', () => api.profileReset(activeProfile.id))} />
+                  <ActionButton label="Полностью удалить aiway" accent="danger" disabled={!canMutateManagedVps} onClick={() => activeProfile && void run('uninstall', () => api.profileUninstall(activeProfile.id))} />
                 </div>
-                {!managedProfile && <p className="muted">Сейчас активен DNS-only режим. Для install/sync/reset/uninstall нужен профиль с SSH-доступом к VPS.</p>}
+                {!canMutateManagedVps && <p className="muted">{canManageVps ? 'Для этого VPS включен безопасный legacy-режим: управление статусом доступно, но install/sync/reset/uninstall скрыты до полной миграции конфигурации.' : 'Сейчас активен DNS-only режим. Для install/sync/reset/uninstall нужен профиль с SSH-доступом к VPS.'}</p>}
               </article>
 
               <article className="panel panel-side">
@@ -576,6 +597,44 @@ function App() {
           </>
         )}
       </main>
+
+      <footer className="app-footer">
+        <div className="app-footer-inner">
+          <div className="footer-meta">
+            <span>AIWAY Manager v{overview.version}</span>
+            <span>Keenetic / Entware</span>
+          </div>
+
+          <div className="footer-actions">
+            <button className="footer-link-button" onClick={() => void run('update-check', async () => setUpdateInfo((await api.checkUpdate()) as UpdateInfo))}>
+              <span className="footer-link-icon">↻</span>
+              <span>{updateInfo?.available ? `Обновить до ${updateInfo.latest}` : 'Проверить обновления'}</span>
+            </button>
+            {updateInfo?.available && (
+              <button className="footer-link-button primary" onClick={() => void run('update-apply', async () => setUpdateInfo((await api.applyUpdate()) as UpdateInfo))}>
+                <span className="footer-link-icon">⬆</span>
+                <span>Установить обновление</span>
+              </button>
+            )}
+            <a className="footer-link-button" href="https://github.com/kirniy/aiway" target="_blank" rel="noreferrer">
+              <span className="footer-link-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.426 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.866-.014-1.699-2.782.605-3.37-1.344-3.37-1.344-.455-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.004.071 1.532 1.033 1.532 1.033.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.57 9.57 0 0 1 2.504.337c1.909-1.296 2.747-1.026 2.747-1.026.546 1.378.202 2.398.1 2.65.64.7 1.028 1.595 1.028 2.688 0 3.848-2.338 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.481A10.019 10.019 0 0 0 22 12.017C22 6.484 17.523 2 12 2Z"/>
+                </svg>
+              </span>
+              <span>GitHub</span>
+            </a>
+            <a className="footer-link-button" href="https://t.me/kirniy" target="_blank" rel="noreferrer">
+              <span className="footer-link-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M9.78 18.65 9.93 14l8.47-7.64c.37-.33-.08-.49-.57-.16L7.37 12.8l-4.5-1.4c-.98-.3-.99-.98.2-1.45L20.64 3.1c.82-.3 1.53.2 1.27 1.45l-3.01 14.18c-.21 1.01-.82 1.26-1.66.78l-4.6-3.39-2.22 2.14c-.24.24-.45.45-.91.39Z"/>
+                </svg>
+              </span>
+              <span>Telegram</span>
+            </a>
+          </div>
+        </div>
+      </footer>
     </div>
   )
 }
