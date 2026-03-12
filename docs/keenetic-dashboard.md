@@ -1,151 +1,155 @@
-# AIWAY Manager for Keenetic
+# AIWAY Manager для Keenetic
 
-`AIWAY Manager` is an **optional** router-side control surface for `aiway`.
+`AIWAY Manager` - это **опциональная** панель управления `aiway`, которая живет прямо на роутере Keenetic.
 
-If you only want the core product, you can stop at:
+Если вам нужен только основной продукт, можно остановиться на двух шагах:
 
-1. `sudo bash install.sh` on the VPS
-2. set your devices or router to use that DNS
+1. запустить `sudo bash install.sh` на VPS
+2. прописать DNS этого VPS на роутере или устройствах
 
-If you want a polished control panel on the router itself, this doc is for you.
+Если же хочется красивую панель на самом Keenetic, проверки состояния, ручной `AIWAY DNS ON/OFF`, управление VPS по SSH и локальный CLI/API, тогда подключается `AIWAY Manager`.
 
-## At a glance
+![AIWAY Manager на Keenetic — десктоп](assets/keenetic-dashboard-desktop.png)
 
-| Mode | What it means | When to use it |
+![AIWAY Manager на Keenetic — мобильный вид](assets/keenetic-dashboard-mobile.png)
+
+## Быстрый выбор сценария
+
+| Режим | Что это значит | Когда использовать |
 |:--|:--|:--|
-| **DNS-only** | Keenetic uses an existing `aiway` DNS endpoint (`IP + SNI`) | You already have a working VPS and just want router control |
-| **Managed VPS** | Keenetic talks to the VPS over SSH and can manage it | You want install / sync / reset / uninstall from the dashboard |
-| **Legacy VPS** | Keenetic reads and lightly manages an older manual setup | You already have a hand-tuned server and do not want a destructive migration |
+| **Только DNS** | Keenetic использует уже существующий `aiway` endpoint (`IP + SNI`) | У вас уже есть рабочий VPS и нужен только контроль DNS на роутере |
+| **Управляемый VPS** | Keenetic подключается к VPS по SSH и может управлять им | Нужны `install / sync / reset / uninstall` из панели |
+| **Бережный legacy VPS** | Keenetic аккуратно работает со старой ручной установкой | Сервер уже настроен вручную и ломать его нельзя |
 
-## One-line install on the router
+## Установка на роутер одной командой
 
-Open Entware shell on the router:
+Откройте Entware shell на роутере:
 
 ```sh
 ssh admin@192.168.1.1
 exec sh
 ```
 
-Then install `AIWAY Manager` with one command:
+И выполните:
 
 ```sh
 wget -qO- https://raw.githubusercontent.com/kirniy/aiway/main/router/scripts/install.sh | sh
 ```
 
-If `wget` is unavailable:
+Если на роутере нет `wget`, используйте:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/kirniy/aiway/main/router/scripts/install.sh | sh
 ```
 
-What the installer does:
+Что делает установщик:
 
-- detects the Keenetic / Entware architecture
-- finds the latest GitHub release
-- downloads the correct `.ipk`
-- installs it via `opkg`
-- starts the dashboard service
-- prints the local URL
+- определяет архитектуру Keenetic / Entware
+- находит последний GitHub release
+- скачивает правильный `.ipk`
+- ставит пакет через `opkg`
+- запускает сервис панели
+- печатает локальный URL
 
-Default URL:
+Адрес по умолчанию:
 
 ```text
 http://192.168.1.1:2233/routing
 ```
 
-## What the dashboard does
+## Что умеет панель
 
-- runs directly on Keenetic
-- supports `DNS-only`, `Managed VPS`, and `Legacy VPS`
-- stores profiles for multiple servers
-- supports SSH key and password auth
-- accepts a private SSH key directly from the web UI
-- shows real router DNS runtime state, not just intended state
-- provides LAN-friendly CLI/API
+- работает прямо на Keenetic
+- поддерживает режимы `Только DNS`, `Управляемый VPS`, `Бережный legacy VPS`
+- хранит несколько VPS-профилей
+- умеет SSH key и password auth
+- принимает приватный SSH-ключ прямо из веб-интерфейса
+- показывает **реальное runtime-состояние DNS на роутере**, а не только желаемое состояние из UI
+- отдает удобный CLI/API для людей и агентов в локальной сети
 
-## The important DNS behavior
+## Самая важная часть: как ведет себя DNS
 
-This is the part that really matters on Keenetic.
+Это ключевой момент всей интеграции с Keenetic.
 
-When `AIWAY DNS` is **ON**:
-
-```mermaid
-flowchart LR
-  A[Dashboard toggle ON] --> B[Bind provider DNS to ISP/WAN]
-  B --> C[Set DoT upstream 151.245.92.201:853 + dns.vnvnc.ru]
-  C --> D[Restart ndnproxy]
-  D --> E[Verify runtime state in ndnproxymain.conf]
-```
-
-When `AIWAY DNS` is **OFF**:
+Когда `AIWAY DNS` **включен**:
 
 ```mermaid
 flowchart LR
-  A[Dashboard toggle OFF] --> B[Clear DoT upstream in Keenetic RCI]
-  B --> C[Keep provider DNS bound to ISP/WAN]
-  C --> D[Restart ndnproxy]
-  D --> E[Verify local DNS resolves through provider DNS]
+  A[Переключатель ON] --> B[DNS провайдера закрепляются за ISP/WAN]
+  B --> C[Включается DoT upstream 151.245.92.201:853 + dns.vnvnc.ru]
+  C --> D[Перезапускается ndnproxy]
+  D --> E[Проверяется реальный runtime state]
 ```
 
-Why this matters:
+Когда `AIWAY DNS` **выключен**:
 
-- on this router, provider DNS can be private ISP addresses like `10.59.3.19` and `10.81.3.19`
-- if AWG owns the default route, those DNS addresses can accidentally go into the tunnel
-- `AIWAY Manager` fixes that by pinning provider DNS back to the ISP path
+```mermaid
+flowchart LR
+  A[Переключатель OFF] --> B[Очищается DoT upstream в Keenetic RCI]
+  B --> C[Остаются только DNS провайдера, закрепленные за ISP/WAN]
+  C --> D[Перезапускается ndnproxy]
+  D --> E[Проверяется, что локальный DNS реально резолвит через провайдера]
+```
 
-So `AIWAY OFF` now means:
+Почему это так важно:
 
-- no DoT upstream
-- provider DNS only
-- provider DNS forced through WAN/ISP, not AWG
+- на Keenetic провайдерские DNS могут быть внутренними адресами, например `10.59.3.19` и `10.81.3.19`
+- если AWG владеет default route, эти DNS могут случайно уйти в туннель
+- `AIWAY Manager` исправляет это и привязывает провайдерские DNS обратно к пути через ISP/WAN
 
-## Control model
+То есть `AIWAY OFF` теперь означает именно это:
 
-### DNS-only
+- `DoT` действительно выключен
+- используется только DNS провайдера
+- DNS провайдера идет через WAN/ISP, а не через AWG
 
-Use this when `aiway` already exists somewhere else.
+## Модель управления
 
-You only fill in:
+### Режим «Только DNS»
 
-- endpoint IP / hostname
-- DoT SNI / domain
+Используйте, если `aiway` уже где-то живет сам по себе.
 
-No SSH is required.
+Нужно заполнить только:
 
-### Managed VPS
+- IP / домен DNS endpoint
+- SNI / домен для DoT
 
-Use this when the router should manage the server itself.
+SSH не нужен.
 
-Available actions:
+### Режим «Управляемый VPS»
 
-- install
-- sync
-- reset
-- uninstall
-- domain add/remove
-- health checks
+Используйте, если роутер должен управлять сервером сам.
 
-### Legacy VPS
+Доступные действия:
 
-Use this when the server already has an older, hand-made setup.
+- `install`
+- `sync`
+- `reset`
+- `uninstall`
+- add/remove доменов
+- проверка состояния
 
-What the dashboard does safely:
+### Режим `Legacy VPS`
 
-- reads real `Angie` / `Blocky` / DNS state
-- checks SSH reachability
-- lists legacy custom domains
-- adds/removes domains with targeted config edits
+Используйте, если на сервере уже стоит старая ручная конфигурация.
 
-What it does **not** do automatically:
+Что панель делает безопасно:
 
-- destructive reinstall
-- blind reset of your hand-tuned server
+- читает реальный статус `Angie` / `Blocky` / DNS
+- проверяет SSH-доступность
+- показывает уже существующие legacy-домены
+- добавляет и удаляет домены точечными изменениями, без полной пересборки сервера
 
-## LAN CLI / API
+Что она **не** делает автоматически:
 
-The dashboard exposes a simple API for humans and agents on the local network.
+- разрушительную переустановку
+- слепой reset старой ручной конфигурации
 
-Examples:
+## CLI / API в локальной сети
+
+Панель дает простой API, которым могут пользоваться и люди, и агенты.
+
+Примеры:
 
 ```bash
 aiway-manager status --endpoint http://192.168.1.1:2233
@@ -155,56 +159,56 @@ aiway-manager dns off --endpoint http://192.168.1.1:2233
 aiway-manager domains add perplexity.ai --endpoint http://192.168.1.1:2233
 ```
 
-## Supported Keenetic targets
+## Поддерживаемые Keenetic-устройства
 
-`AIWAY Manager` is not tied to one single model.
+`AIWAY Manager` не привязан к одной конкретной модели.
 
-Current package targets:
+Сейчас собираются пакеты для:
 
 - `mips-3.4_kn`
 - `mipsel-3.4_kn`
 - `aarch64-3.10_kn`
 
-That covers multiple Keenetic devices that use Entware.
+Это покрывает несколько Keenetic-моделей с Entware.
 
-## Not supported yet
+## Что пока не поддерживается
 
 - OpenWrt
 - AsusWRT
 - MikroTik
 - FreshTomato
-- other router families
+- другие семейства роутеров
 
-The concept is portable, but those platforms need their own DNS / route integration layer.
+Идея переносима, но там нужен отдельный слой интеграции для DNS и маршрутов.
 
-## Router package structure
+## Как устроен пакет на роутере
 
-| Path | Purpose |
+| Путь | Назначение |
 |:--|:--|
-| `router/cmd/aiway-manager` | Go daemon + CLI |
-| `router/web` | Dashboard frontend |
-| `router/webui/dist` | embedded built frontend |
-| `router/package` | Entware init / lifecycle scripts |
-| `router/scripts/install.sh` | one-line installer |
+| `router/cmd/aiway-manager` | Go-сервис и CLI |
+| `router/web` | фронтенд панели |
+| `router/webui/dist` | встроенная собранная веб-часть |
+| `router/package` | init-скрипты и lifecycle-файлы для Entware |
+| `router/scripts/install.sh` | установщик одной командой |
 
-## Build from source
+## Сборка из исходников
 
 ```bash
 cd router
 make package
 ```
 
-Produced packages:
+На выходе:
 
 - `aiway-manager_<version>_aarch64-3.10-kn.ipk`
 - `aiway-manager_<version>_mips-3.4-kn.ipk`
 - `aiway-manager_<version>_mipsel-3.4-kn.ipk`
 
-## VPS side companion
+## Что происходит на стороне VPS
 
-The router talks to the VPS through `aiwayctl`.
+Роутер общается с VPS через `aiwayctl`.
 
-Main commands:
+Основные команды:
 
 - `aiwayctl status`
 - `aiwayctl doctor`
@@ -214,15 +218,15 @@ Main commands:
 - `aiwayctl reapply`
 - `aiwayctl uninstall`
 
-## Practical guidance
+## Практическая рекомендация
 
-If you just want the safest setup:
+Если нужен максимально безопасный путь:
 
-- leave the VPS setup alone
-- connect the dashboard in `DNS-only` or `Legacy VPS` mode
-- use the router only for DNS control and visibility
+- не трогайте уже работающий VPS лишний раз
+- подключайте панель в режиме `Только DNS` или `Legacy VPS`
+- используйте роутер только для DNS-контроля, проверок и видимости
 
-If you want the most automation:
+Если нужен максимум автоматизации:
 
-- move to a fully managed VPS profile
-- let the router own the lifecycle and health-checking
+- переводите сервер в полностью управляемый режим
+- и пусть роутер берет на себя жизненный цикл сервера и проверки состояния

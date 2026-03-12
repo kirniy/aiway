@@ -34,7 +34,7 @@ sudo bash install.sh
 
 Всё. Скрипт сам установит зависимости, всё настроит и в конце выведет IP, который нужно прописать в DNS на роутере/телефоне/ноутбуке.
 
-## Keenetic dashboard
+## Панель для Keenetic
 
 В репозитории теперь есть отдельный роутерный контур: `AIWAY Manager` для Keenetic / Entware.
 
@@ -44,15 +44,17 @@ sudo bash install.sh
 
 | Сценарий | Когда подходит | Что делать |
 |:--|:--|:--|
-| **VPS only** | Хотите просто вернуть ChatGPT / Claude / Gemini без лишнего UI | `sudo bash install.sh` на VPS и прописать DNS на устройствах |
-| **VPS + Keenetic dashboard** | Хотите GUI на роутере, health-check, DNS toggle, SSH-управление VPS | поставить `AIWAY Manager` на Keenetic |
+| **Только VPS** | Хотите просто вернуть ChatGPT / Claude / Gemini без лишнего UI | `sudo bash install.sh` на VPS и прописать DNS на устройствах |
+| **VPS + Keenetic** | Хотите панель на роутере, проверки состояния, переключатель DNS и SSH-управление VPS | поставить `AIWAY Manager` на Keenetic |
 
 ### Что дает `AIWAY Manager`
 
+![AIWAY Manager на Keenetic](docs/assets/keenetic-dashboard-desktop.png)
+
 - панель на самом роутере: `http://192.168.1.1:2233/routing`
-- `DNS-only` режим: можно использовать уже существующий `aiway` endpoint без SSH
-- `Managed VPS` режим: установка и управление VPS по SSH из GUI
-- health-check и fail-safe
+- режим `Только DNS`: можно использовать уже существующий `aiway` endpoint без SSH
+- режим `Управляемый VPS`: установка и управление VPS по SSH из панели
+- проверки состояния и fail-safe
 - кастомные домены и CLI/API для локальной сети
 - безопасный `AIWAY OFF`: при выключении роутер возвращается к DNS провайдера и закрепляет эти DNS через WAN/ISP, чтобы они не уходили в AWG default route
 
@@ -70,7 +72,7 @@ curl -fsSL https://raw.githubusercontent.com/kirniy/aiway/main/router/scripts/in
 
 Поддерживаемые архитектуры Keenetic / Entware: `mips`, `mipsel`, `aarch64`.
 
-Подробности, режимы работы, поддержка legacy VPS и CLI/API: [`docs/keenetic-dashboard.md`](docs/keenetic-dashboard.md).
+Подробности, режимы работы, поддержка `Legacy VPS` и локальный CLI/API: [`docs/keenetic-dashboard.md`](docs/keenetic-dashboard.md).
 
 ## VPS hardening
 
@@ -426,7 +428,7 @@ ss -tlnp | grep :443
 | Файл | Содержание |
 |:--|:--|
 | [как-это-работает.md](docs/как-это-работает.md) | Технический разбор SNI proxy и DNS, архитектура, ECH, QUIC |
-| [keenetic-dashboard.md](docs/keenetic-dashboard.md) | Дашборд на роутере, CLI/API, Entware-пакет, управление VPS через SSH |
+| [keenetic-dashboard.md](docs/keenetic-dashboard.md) | Панель на роутере, локальный CLI/API, Entware-пакет, управление VPS через SSH |
 | [устройства.md](docs/устройства.md) | Настройка DNS на роутере, Android, iOS, macOS, Windows, Linux |
 | [диагностика.md](docs/диагностика.md) | Что делать если не работает, типичные ошибки, полезные команды |
 | [faq.md](docs/faq.md) | Ответы на частые вопросы |

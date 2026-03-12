@@ -23,6 +23,7 @@ function App() {
   const [error, setError] = useState('')
   const [newDomain, setNewDomain] = useState('')
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
+  const [showAllDomains, setShowAllDomains] = useState(false)
 
   const refresh = async () => {
     try {
@@ -86,6 +87,7 @@ function App() {
 			...customDomains,
 		]),
 	).length
+	const visibleCustomDomains = showAllDomains ? customDomains : customDomains.slice(0, 6)
 
   const failsafe = draftConfig.routing.failsafeActive
 	const managedProfile = Boolean(activeProfile?.host?.trim())
@@ -279,7 +281,7 @@ function App() {
                     {activeStatus?.installState === 'legacy' && <p className="muted">Для этого VPS панель меняет текущие Angie/Blocky-конфиги точечно, без полной переустановки.</p>}
                     <div className="chips-stack chips-scroll">
                       {customDomains.length === 0 && <p className="muted">Кастомных доменов пока нет.</p>}
-                      {customDomains.map((domain) => (
+                      {visibleCustomDomains.map((domain) => (
                         <div key={domain} className="chip-row">
                           <span>{domain}</span>
                           <button className="ghost-link" onClick={() => void run('remove-domain', () => api.removeDomain(domain))}>
@@ -288,6 +290,11 @@ function App() {
                         </div>
                       ))}
                     </div>
+                    {customDomains.length > 6 && (
+                      <button className="ghost-link domains-expand-link" onClick={() => setShowAllDomains((value) => !value)}>
+                        {showAllDomains ? 'Свернуть список' : `Показать все домены (${customDomains.length})`}
+                      </button>
+                    )}
                     <button className="btn btn-secondary btn-full" onClick={() => void run('save-config', () => api.saveConfig(draftConfig))}>
                       Сохранить маршрутизацию
                     </button>
