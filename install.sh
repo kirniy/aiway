@@ -266,11 +266,23 @@ install_runtime_assets() {
 
     mkdir -p "$AIWAY_RUNTIME_DIR/lib"
 
-    install -m 755 "$SCRIPT_DIR/install.sh" "$AIWAY_RUNTIME_DIR/install.sh"
-    install -m 755 "$SCRIPT_DIR/uninstall.sh" "$AIWAY_RUNTIME_DIR/uninstall.sh"
-    install -m 644 "$SCRIPT_DIR/lib/utils.sh" "$AIWAY_RUNTIME_DIR/lib/utils.sh"
-    install -m 644 "$SCRIPT_DIR/lib/domains.sh" "$AIWAY_RUNTIME_DIR/lib/domains.sh"
-    install -m 755 "$SCRIPT_DIR/server/aiwayctl.sh" "$AIWAY_CTL_TARGET"
+    install_runtime_asset() {
+        local mode="$1"
+        local source="$2"
+        local target="$3"
+
+        if [[ -e "$target" && "$source" -ef "$target" ]]; then
+            return 0
+        fi
+
+        install -m "$mode" "$source" "$target"
+    }
+
+    install_runtime_asset 755 "$SCRIPT_DIR/install.sh" "$AIWAY_RUNTIME_DIR/install.sh"
+    install_runtime_asset 755 "$SCRIPT_DIR/uninstall.sh" "$AIWAY_RUNTIME_DIR/uninstall.sh"
+    install_runtime_asset 644 "$SCRIPT_DIR/lib/utils.sh" "$AIWAY_RUNTIME_DIR/lib/utils.sh"
+    install_runtime_asset 644 "$SCRIPT_DIR/lib/domains.sh" "$AIWAY_RUNTIME_DIR/lib/domains.sh"
+    install_runtime_asset 755 "$SCRIPT_DIR/server/aiwayctl.sh" "$AIWAY_CTL_TARGET"
 
     cat > "$AIWAY_INSTALLER_ENV" <<EOF
 AIWAY_VPS_IP="${VPS_IP}"
@@ -463,6 +475,11 @@ stream {
                      '"\$ssl_preread_server_name"';
 
     access_log /var/log/angie/stream.log proxy;
+
+    # Required for proxy_pass with variable hostnames like \$ssl_preread_server_name.
+    # Resolve upstream AI domains directly instead of feeding Blocky's rewritten answers back into Angie.
+    resolver 8.8.8.8 1.1.1.1 ipv6=off valid=300s;
+    resolver_timeout 5s;
 
     include ${ANGIE_STREAM_DIR}/*.conf;
 }
